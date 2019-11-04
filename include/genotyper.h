@@ -13,6 +13,8 @@ namespace GLnexus {
 //
 // residual_rec: in case there are call losses, generate a YAML formatted record giving
 // the context. This is used offline to improve the algorithms.
+//
+// May set ans to nullptr if the site ends up with all ALT alleles trimmed.
 Status genotype_site(const genotyper_config& cfg, MetadataCache& cache, BCFData& data,
                      const unified_site& site,
                      const std::string& sampleset, const std::vector<std::string>& samples,
@@ -32,7 +34,8 @@ enum class NoCallReason {
     LostAllele,           /// unrepresentable allele (other than overlapping deletion)
     UnphasedVariants,     /// site spans multiple unphased variants
     OverlappingVariants,  /// site spans multiple variants which overlap each other
-    MonoallelicSite       /// site is monoallelic; no assertion about the presence of either ref or alt allele
+    MonoallelicSite,      /// site is monoallelic; no assertion about the presence of either ref or alt allele
+    InputNonCalled,       /// the relevant input gVCF record is itself non-called
 };
 
 /// A single allele call and metadata; diploid samples each have two calls

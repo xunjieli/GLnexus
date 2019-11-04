@@ -470,7 +470,7 @@ gatk:
         min_AQ2: 40
         min_GQ: 40
         monoallelic_sites_for_lost_alleles: true
-        max_alleles_per_site: 70
+        max_alleles_per_site: 32
     genotyper_config:
         required_dp: 1
         revise_genotypes: true
@@ -706,7 +706,7 @@ weCall:
         min_AQ2: 30
         min_GQ: 30
         monoallelic_sites_for_lost_alleles: true
-        max_alleles_per_site: 70
+        max_alleles_per_site: 32
     genotyper_config:
         required_dp: 1
         revise_genotypes: true
@@ -761,15 +761,107 @@ weCall:
               count: 1
               ignore_non_variants: true
 DeepVariant:
-    description: "[EXPERIMENTAL] Merge DeepVariant gVCFs with no QC filters or genotype revision"
+    description: Joint call DeepVariant whole genome sequencing gVCFs
     unifier_config:
-        min_AQ1: 0
-        min_AQ2: 0
+        min_AQ1: 10
+        min_AQ2: 10
         min_GQ: 0
         monoallelic_sites_for_lost_alleles: true
     genotyper_config:
         required_dp: 0
-        revise_genotypes: false
+        revise_genotypes: true
+        more_PL: true
+        trim_uncalled_alleles: true
+        liftover_fields:
+            - orig_names: [MIN_DP, DP]
+              name: DP
+              description: '##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Approximate read depth (reads with MQ=255 or with bad mates are filtered)">'
+              type: int
+              combi_method: min
+              number: basic
+              count: 1
+              ignore_non_variants: true
+            - orig_names: [AD]
+              name: AD
+              description: '##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths for the ref and alt alleles in the order listed">'
+              type: int
+              number: alleles
+              combi_method: min
+              default_type: zero
+              count: 0
+            - orig_names: [GQ]
+              name: GQ
+              description: '##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">'
+              type: int
+              number: basic
+              combi_method: min
+              count: 1
+              ignore_non_variants: true
+            - orig_names: [PL]
+              name: PL
+              description: '##FORMAT=<ID=PL,Number=G,Type=Integer,Description="Phred-scaled genotype Likelihoods">'
+              type: int
+              number: genotype
+              combi_method: missing
+              count: 0
+              ignore_non_variants: true
+DeepVariantWGS:
+    description: Joint call DeepVariant whole genome sequencing gVCFs
+    unifier_config:
+        min_AQ1: 10
+        min_AQ2: 10
+        min_GQ: 0
+        monoallelic_sites_for_lost_alleles: true
+    genotyper_config:
+        required_dp: 0
+        revise_genotypes: true
+        more_PL: true
+        trim_uncalled_alleles: true
+        liftover_fields:
+            - orig_names: [MIN_DP, DP]
+              name: DP
+              description: '##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Approximate read depth (reads with MQ=255 or with bad mates are filtered)">'
+              type: int
+              combi_method: min
+              number: basic
+              count: 1
+              ignore_non_variants: true
+            - orig_names: [AD]
+              name: AD
+              description: '##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths for the ref and alt alleles in the order listed">'
+              type: int
+              number: alleles
+              combi_method: min
+              default_type: zero
+              count: 0
+            - orig_names: [GQ]
+              name: GQ
+              description: '##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">'
+              type: int
+              number: basic
+              combi_method: min
+              count: 1
+              ignore_non_variants: true
+            - orig_names: [PL]
+              name: PL
+              description: '##FORMAT=<ID=PL,Number=G,Type=Integer,Description="Phred-scaled genotype Likelihoods">'
+              type: int
+              number: genotype
+              combi_method: missing
+              count: 0
+              ignore_non_variants: true
+DeepVariantWES:
+    description: Joint call DeepVariant whole exome sequencing gVCFs
+    unifier_config:
+        min_AQ1: 35
+        min_AQ2: 20
+        min_GQ: 20
+        monoallelic_sites_for_lost_alleles: true
+    genotyper_config:
+        required_dp: 0
+        revise_genotypes: true
+        more_PL: true
+        trim_uncalled_alleles: true
         liftover_fields:
             - orig_names: [MIN_DP, DP]
               name: DP
@@ -853,9 +945,11 @@ Status load_config(std::shared_ptr<spdlog::logger> logger,
                    const YAML::Node& config,
                    unifier_config& unifier_cfg,
                    genotyper_config& genotyper_cfg,
+                   std::string& config_txt,
                    std::string& config_crc32c,
                    bool more_PL,
-                   bool squeeze) {
+                   bool squeeze,
+                   bool trim_uncalled_alleles) {
     Status s;
     if (config["unifier_config"]) {
         S(unifier_config::of_yaml(config["unifier_config"], unifier_cfg));
@@ -865,17 +959,30 @@ Status load_config(std::shared_ptr<spdlog::logger> logger,
     }
     genotyper_cfg.more_PL = more_PL;
     genotyper_cfg.squeeze = squeeze;
-    YAML::Emitter em;
-    em << YAML::BeginMap
-       << YAML::Key << "unifier_config" << YAML::Value;
-    S(unifier_cfg.yaml(em));
-    em << YAML::Key << "genotyper_config" << YAML::Value;
-    S(genotyper_cfg.yaml(em));
-    em << YAML::EndMap;
-    std::string config_text = em.c_str();
-    logger->info("config:\n{}", config_text);
+    genotyper_cfg.trim_uncalled_alleles = trim_uncalled_alleles;
 
-    config_crc32c = std::to_string(rocksdb::crc32c::Value(config_text.c_str(), config_text.size()));
+    #define WRITE_CONFIG(em)                                   \
+        em << YAML::BeginMap                                   \
+           << YAML::Key << "unifier_config" << YAML::Value;    \
+        S(unifier_cfg.yaml(em));                               \
+        em << YAML::Key << "genotyper_config" << YAML::Value;  \
+        S(genotyper_cfg.yaml(em));                             \
+        em << YAML::EndMap;
+
+    // log a pretty-printed configuration
+    YAML::Emitter pretty;
+    pretty << YAML::Block;
+    WRITE_CONFIG(pretty);
+    logger->info("config:\n{}", pretty.c_str());
+
+    // write one-liner configuration for checksumming & VCF header
+    YAML::Emitter one_line;
+    one_line.SetMapFormat(YAML::Flow);
+    one_line.SetSeqFormat(YAML::Flow);
+    WRITE_CONFIG(one_line);
+    config_txt = one_line.c_str();
+    assert(config_txt.find('\n') == string::npos);
+    config_crc32c = std::to_string(rocksdb::crc32c::Value(config_txt.c_str(), config_txt.size()));
     logger->info("config CRC32C = {}", config_crc32c);
     return Status::OK();
 }
@@ -884,9 +991,11 @@ Status load_config(std::shared_ptr<spdlog::logger> logger,
                    const std::string& name,
                    unifier_config& unifier_cfg,
                    genotyper_config& genotyper_cfg,
+                   std::string& config_txt,
                    std::string& config_crc32c,
                    bool more_PL,
-                   bool squeeze) {
+                   bool squeeze,
+                   bool trim_uncalled_alleles) {
     Status s;
     if (name.size() > 4 && name.substr(name.size() - 4) == ".yml") {
         try {
@@ -895,7 +1004,7 @@ Status load_config(std::shared_ptr<spdlog::logger> logger,
             if (!config || !config.IsMap()) {
                 return Status::IOError("loading configuration YAML file", name);
             }
-            return load_config(logger, config, unifier_cfg, genotyper_cfg, config_crc32c, more_PL, squeeze);
+            return load_config(logger, config, unifier_cfg, genotyper_cfg, config_txt, config_crc32c, more_PL, squeeze, trim_uncalled_alleles);
         } catch (YAML::Exception& exn) {
             return Status::IOError("loading configuration YAML file", name);
         }
@@ -905,7 +1014,7 @@ Status load_config(std::shared_ptr<spdlog::logger> logger,
         if (!presets || !presets.IsMap() || !presets[name] || !presets[name].IsMap()) {
             return Status::NotFound("unknown configuration preset", name);
         }
-        return load_config(logger, presets[name], unifier_cfg, genotyper_cfg, config_crc32c, more_PL, squeeze);
+        return load_config(logger, presets[name], unifier_cfg, genotyper_cfg, config_txt, config_crc32c, more_PL, squeeze, trim_uncalled_alleles);
     }
 }
 
@@ -917,9 +1026,9 @@ std::string describe_config_presets() {
     for (YAML::const_iterator it = presets.begin(); it != presets.end(); ++it) {
         unifier_config uc;
         genotyper_config gc;
-        std::string config_crc32c;
+        std::string config_txt, config_crc32c;
         auto logger = spdlog::create<spdlog::sinks::null_sink_st>("null");
-        Status s = load_config(logger, it->second, uc, gc, config_crc32c, false, false);
+        Status s = load_config(logger, it->second, uc, gc, config_txt, config_crc32c, false, false, false);
         spdlog::drop("null");
         if (s.ok()) {
             os << setw(16) << it->first.as<string>();

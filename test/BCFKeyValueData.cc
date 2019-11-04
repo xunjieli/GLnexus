@@ -1532,7 +1532,7 @@ TEST_CASE("BCFKeyValueData NA12878 import and query") {
             range q(16, lo, hi);
 
             std::vector<std::shared_ptr<bcf1_t> > resultset, truthset;
-            ls = data->dataset_range("NA12878", hdr.get(), q, nullptr, resultset);
+            ls = data->dataset_range("NA12878", hdr.get(), q, nullptr, &resultset);
             if (ls.bad()) {
                 return ls;
             }

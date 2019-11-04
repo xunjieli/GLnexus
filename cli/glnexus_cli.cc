@@ -40,7 +40,7 @@ GLnexus::Status s;
 static int all_steps(const vector<string> &vcf_files,
                      const string &bedfilename,
                      const string &config_name,
-                     bool more_PL, bool squeeze,
+                     bool more_PL, bool squeeze, bool trim_uncalled_alleles,
                      size_t mem_budget, size_t nr_threads,
                      bool debug,
                      bool iter_compare,
@@ -48,7 +48,7 @@ static int all_steps(const vector<string> &vcf_files,
     GLnexus::Status s;
     GLnexus::unifier_config unifier_cfg;
     GLnexus::genotyper_config genotyper_cfg;
-    string cfg_crc32c;
+    string cfg_txt, cfg_crc32c;
 
     if (vcf_files.empty()) {
         console->error("No source GVCF files specified");
@@ -56,7 +56,8 @@ static int all_steps(const vector<string> &vcf_files,
     }
 
     H("load unifier/genotyper configuration",
-        GLnexus::cli::utils::load_config(console, config_name, unifier_cfg, genotyper_cfg, cfg_crc32c, more_PL, squeeze));
+        GLnexus::cli::utils::load_config(console, config_name, unifier_cfg, genotyper_cfg, cfg_txt, cfg_crc32c,
+                                         more_PL, squeeze, trim_uncalled_alleles));
 
     // initilize empty database
     string dbpath("GLnexus.DB");
@@ -139,7 +140,11 @@ static int all_steps(const vector<string> &vcf_files,
 
     // genotype
     genotyper_cfg.output_residuals = debug;
-    vector<string> hdr_lines = { ("##GLnexusConfig="+config_name), ("##GLnexusConfigCRC32C="+cfg_crc32c) };
+    vector<string> hdr_lines = {
+        ("##GLnexusConfigName="+config_name),
+        ("##GLnexusConfigCRC32C="+cfg_crc32c),
+        ("##GLnexusConfig="+cfg_txt)
+    };
     auto DX_JOB_ID = std::getenv("DX_JOB_ID");
     if (DX_JOB_ID) {
         // if running in DNAnexus, record job ID in header
@@ -157,14 +162,15 @@ void help(const char* prog) {
     cout << "Usage: " << prog << " [options] /vcf/file/1 .. /vcf/file/N" << endl
          << "Merge and joint-call input gVCF files, emitting multi-sample BCF on standard output." << endl << endl
          << "Options:" << endl
-         << "  --bed FILE, -b FILE   three-column BED file of ranges to analyze (if omitted, use full length of all contigs)" << endl
-         << "  --config X, -c X      configuration preset name or .yml filename (default: gatk)" << endl
-         << "  --more-PL, -P         include PL from reference bands and other cases omitted by default" << endl
-         << "  --squeeze, -S         reduce pVCF size by suppressing detail in cells derived from reference bands" << endl
-         << "  --list, -l            given files contain lists of gVCF filenames, one per line" << endl
-         << "  --mem-gbytes X, -m X  memory budget, in gbytes (default: most of system memory)" << endl
-         << "  --threads X, -t X     thread budget (default: all hardware threads)" << endl
-         << "  --help, -h            print this help message" << endl
+         << "  --bed FILE, -b FILE            three-column BED file of ranges to analyze (if omitted, use full length of all contigs)" << endl
+         << "  --config X, -c X               configuration preset name or .yml filename (default: gatk)" << endl
+         << "  --more-PL, -P                  include PL from reference bands and other cases omitted by default" << endl
+         << "  --squeeze, -S                  reduce pVCF size by suppressing detail in cells derived from reference bands" << endl
+         << "  --trim-uncalled-alleles, -a    remove alleles with no output GT calls in postprocessing" << endl
+         << "  --list, -l                     given files contain lists of gVCF filenames, one per line" << endl
+         << "  --mem-gbytes X, -m X           memory budget, in gbytes (default: most of system memory)" << endl
+         << "  --threads X, -t X              thread budget (default: all hardware threads)" << endl
+         << "  --help, -h                     print this help message" << endl
          << endl << "Configuration presets:" << endl;
     cout << GLnexus::cli::utils::describe_config_presets() << endl;
 }
@@ -195,6 +201,7 @@ int main(int argc, char *argv[]) {
         {"config", required_argument, 0, 'c'},
         {"more-PL", no_argument, 0, 'P'},
         {"squeeze", no_argument, 0, 'S'},
+        {"trim-uncalled-alleles", no_argument, 0, 'a'},
         {"list", no_argument, 0, 'l'},
         {"mem-gbytes", required_argument, 0, 'm'},
         {"threads", required_argument, 0, 't'},
@@ -208,6 +215,7 @@ int main(int argc, char *argv[]) {
     string config_name = "gatk";
     bool more_PL = false;
     bool squeeze = false;
+    bool trim_uncalled_alleles = false;
     bool list_of_files = false;
     bool debug = false;
     bool iter_compare = false;
@@ -215,7 +223,7 @@ int main(int argc, char *argv[]) {
     size_t mem_budget = 0, nr_threads = 0;
     size_t bucket_size = GLnexus::BCFKeyValueData::default_bucket_size;
 
-    while (-1 != (c = getopt_long(argc, argv, "hb:dIx:m:t:c:",
+    while (-1 != (c = getopt_long(argc, argv, "hPSadil:b:x:m:t:c:",
                                   long_options, nullptr))) {
         switch (c) {
             case 'b':
@@ -240,6 +248,10 @@ int main(int argc, char *argv[]) {
 
             case 'S':
                 squeeze = true;
+                break;
+
+            case 'a':
+                trim_uncalled_alleles = true;
                 break;
 
             case 'd':
@@ -311,5 +323,5 @@ int main(int argc, char *argv[]) {
         vcf_files = vcf_files_precursor;
     }
 
-    return all_steps(vcf_files, bedfilename, config_name, more_PL, squeeze, mem_budget, nr_threads, debug, iter_compare, bucket_size);
+    return all_steps(vcf_files, bedfilename, config_name, more_PL, squeeze, trim_uncalled_alleles, mem_budget, nr_threads, debug, iter_compare, bucket_size);
 }

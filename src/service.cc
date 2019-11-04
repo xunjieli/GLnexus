@@ -191,11 +191,15 @@ static Status prepare_bcf_header(const vector<pair<string,size_t> >& contigs,
                                  const vector<string>& extra_header_lines,
                                  shared_ptr<bcf_hdr_t>& ans) {
     vector<string> hdr_lines;
+    hdr_lines.push_back("##GLnexusVersion=" + string(GIT_REVISION));
+    for (const auto& line : extra_header_lines) {
+        hdr_lines.push_back(line);
+    }
     hdr_lines.push_back("##INFO=<ID=AF,Number=A,Type=Float,Description=\"Allele Frequency estimate for each alternate allele\">");
     hdr_lines.push_back("##INFO=<ID=AQ,Number=A,Type=Integer,Description=\"Allele Quality score reflecting evidence for each alternate allele (Phred scale)\">");
     hdr_lines.push_back("##FILTER=<ID=MONOALLELIC,Description=\"Site represents one ALT allele in a region with multiple variants that could not be unified into non-overlapping multi-allelic sites\">");
     hdr_lines.push_back("##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">");
-    hdr_lines.push_back("##FORMAT=<ID=RNC,Number=2,Type=Character,Description=\"Reason for No Call in GT: . = n/a, M = Missing data, P = Partial data, D = insufficient Depth of coverage, - = unrepresentable overlapping deletion, L = Lost/unrepresentable allele (other than deletion), U = multiple Unphased variants present, O = multiple Overlapping variants present, 1 = site is Monoallelic, no assertion about presence of REF or ALT allele\">");
+    hdr_lines.push_back("##FORMAT=<ID=RNC,Number=2,Type=Character,Description=\"Reason for No Call in GT: . = n/a, M = Missing data, P = Partial data, I = gVCF input site is non-called, D = insufficient Depth of coverage, - = unrepresentable overlapping deletion, L = Lost/unrepresentable allele (other than deletion), U = multiple Unphased variants present, O = multiple Overlapping variants present, 1 = site is Monoallelic, no assertion about presence of REF or ALT allele\">");
     for (auto& format_field : format_fields) {
         hdr_lines.push_back(format_field.description);
     }
@@ -203,10 +207,6 @@ static Status prepare_bcf_header(const vector<pair<string,size_t> >& contigs,
         ostringstream stm;
         stm << "##contig=<ID=" << ctg.first << ",length=" << ctg.second << ">";
         hdr_lines.push_back(stm.str());
-    }
-    hdr_lines.push_back("##GLnexusVersion=" + string(GIT_REVISION));
-    for (const auto& line : extra_header_lines) {
-        hdr_lines.push_back(line);
     }
 
     shared_ptr<bcf_hdr_t> hdr(bcf_hdr_init("w1"), &bcf_hdr_destroy);
@@ -387,12 +387,12 @@ Status Service::genotype_sites(const genotyper_config& cfg, const string& sample
 
         if (s.ok() && s_i.ok()) {
             // if everything's OK, proceed to write the record
-            assert(bcf_i);
-            s = bcf_out->write(bcf_i.get());
+            if (bcf_i) {
+                s = bcf_out->write(bcf_i.get());
+            }
             if (s.bad()) {
                 abort = true;
-            }
-            else if (residual_rec != nullptr) {
+            } else if (residual_rec != nullptr) {
                 // We have a residuals record, write it to disk.
                 s = residualsFile->write_record(*residual_rec);
                 if (s.bad()) {
